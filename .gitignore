@@ -1,0 +1,17 @@
+# Kaggle credentials - never commit
+kaggle.json
+access_token
+.kaggle/
+
+# Kaggle kernel output
+out/
+out*/
+nb*/
+# Downloaded kernel source (folder named after the kernel slug)
+deltaflow-cfm-delta-alignment-pretraining-poc/
+
+deltaflow
+kernel_output_*
+notebook_inspect
+versions
+__pycache__/

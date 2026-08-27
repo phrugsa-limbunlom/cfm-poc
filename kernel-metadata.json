@@ -1,0 +1,21 @@
+{
+  "id": "phrugsalimbunlom/deltaflow-cfm-delta-alignment-pretraining-poc",
+  "title": "DeltaFlow: CFM + Delta-Alignment Pretraining (PoC)",
+  "code_file": "cfm_delta_align_pretrain.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "keywords": [],
+  "dataset_sources": [
+    "raddar/tuberculosis-chest-xrays-shenzhen",
+    "jiahongqian/cephalometric-landmarks",
+    "phrugsalimbunlom/digital-hand-atlas-256"
+  ],
+  "kernel_sources": [],
+  "competition_sources": [],
+  "model_sources": [],
+  "machine_shape": "NvidiaTeslaT4"
+}
