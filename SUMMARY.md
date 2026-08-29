@@ -2098,3 +2098,44 @@ CAVEAT / next step for rigour: single seed. To harden the claim, repeat both
 backbones over >=3 seeds and report mean +/- spread (the frozen-probe gap of
 1.69 mm is large relative to the finetune noise, but seeds would make it
 airtight), and optionally add the 250-iter-checkpoint sample-efficiency curve.
+---
+
+## §7 sampling: backbone-aware sampler (DDPM ancestral SDE vs CFM Euler ODE)
+
+PROBLEM: the "§7 Sampling check" cell produced pure static (structureless
+noise) for the DDPM-backbone run (`EXPERIMENT["backbone"]="ddpm"`), e.g. the
+"CFM samples (euler ODE, 200 steps)" grid — both unconditional and chest+CFG
+rows were indistinguishable from the input noise.
+
+ROOT CAUSE: the cell had a single sampler, `cfm_sample`, an explicit Euler
+integrator of the ODE `dx/dt = v(x, t)`. That is only correct for a CFM
+(velocity-field) backbone. A DDPM backbone predicts the injected NOISE
+`eps(x_i, i)`, not a velocity, and its generative process is the discrete
+ANCESTRAL SDE reverse chain (Ho et al. 2020), which injects fresh Gaussian
+noise at every step. Feeding a noise-prediction network into a deterministic
+velocity ODE integrator (no stochastic term, wrong target semantics) integrates
+garbage, hence the static. The title even mislabelled the run as "CFM samples"
+regardless of backbone.
+
+FIX (notebook cell 29 + §7 markdown):
+- Added `ddpm_sample(...)`: the correct ancestral reverse process using the
+  SAME schedule as training's `DDPMInterpolant` (linear beta 1e-4->0.028,
+  T=500). Per step i (T-1..0):
+    eps_hat = eps_theta(x_i, t_i)                       (CFG-adjusted)
+    mu      = (x_i - beta_i/sqrt(1-abar_i) * eps_hat) / sqrt(alpha_i)
+    x_{i-1} = mu + sqrt(beta_tilde_i) * z   (z~N(0,I); z=0 at i=0)
+  with posterior variance beta_tilde_i = beta_i*(1-abar_{i-1})/(1-abar_i)
+  (Ho Eq. 7). Continuous t fed to the UNet follows the repo convention
+  t_i = 1 - i/(T-1), matching DDPMInterpolant's idx = round((1-t)*(T-1)) EXACTLY.
+- The cell now DISPATCHES on `E.backbone`: "ddpm" -> `ddpm_sample` (DDPM_T=500,
+  which MUST equal the training T so the beta schedule matches), "cfm" ->
+  `cfm_sample` (Euler/Heun ODE) unchanged. CFG mechanism is identical in both
+  (guidance on the predicted quantity: velocity for CFM, noise for DDPM).
+- Fixed the figure title to name the actual backbone/sampler instead of always
+  saying "CFM samples".
+
+CAVEAT (unchanged, honest): the correct sampler removes the integrator MISMATCH,
+but sample *fidelity* is still limited by backbone capacity + pretraining
+compute (~3.3k iters). Expect recognisable ribs/lung fields only after the
+scaled-up backbone is trained longer; the sampler fix makes the DDPM samples
+structured/denoised rather than static, not photorealistic.
