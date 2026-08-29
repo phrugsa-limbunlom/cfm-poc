@@ -9,6 +9,36 @@ add a new heading each time a version is pushed; do not rewrite past entries.
 
 ---
 
+## v24 (2026-08-29)
+
+**§7 sampling made backbone-aware — correct DDPM ancestral SDE sampler.**
+
+- **Bug:** the §7 "Sampling check" cell only had `cfm_sample` (explicit Euler
+  ODE integrator of `dx/dt = v(x,t)`), which is valid *only* for a
+  velocity-field CFM backbone. For `backbone="ddpm"` the network predicts noise
+  `eps`, not velocity, and its generative process is the stochastic ancestral
+  reverse chain — feeding it through the deterministic velocity ODE produced
+  pure static (structureless noise) in both the unconditional and chest+CFG
+  rows.
+- **Fix:** added `ddpm_sample(...)`, the correct DDPM ancestral SDE reverse
+  process (Ho et al. 2020) using the **same schedule as training's
+  `DDPMInterpolant`** (linear beta 1e-4→0.028, T=500):
+  `mu = (x_i − beta_i/√(1−ᾱ_i)·eps_hat)/√alpha_i`, then
+  `x_{i-1} = mu + √beta_tilde_i·z` with posterior variance
+  `beta_tilde_i = beta_i(1−ᾱ_{i-1})/(1−ᾱ_i)` (Ho Eq. 7), no noise at the final
+  step. Continuous `t_i = 1 − i/(T−1)` matches `DDPMInterpolant`'s
+  `idx = round((1−t)(T−1))` exactly.
+- The cell now **dispatches on `E.backbone`**: `"ddpm"` → `ddpm_sample`
+  (`DDPM_T=500`, must equal training T), `"cfm"` → `cfm_sample` (Euler/Heun ODE,
+  unchanged). CFG mechanism identical in both (guidance on the predicted
+  quantity: velocity for CFM, noise for DDPM). Fixed the figure title, which
+  previously always said "CFM samples" regardless of backbone.
+- **Scope:** sampling/visualisation only — no change to pretraining, probe, or
+  reported MRE/SDR metrics. Fidelity still limited by backbone capacity +
+  compute; the fix removes the integrator *mismatch* (structured/denoised output
+  instead of static), not the capacity ceiling.
+
+
 ## v23 (2026-08-26)
 
 **DDPM noise-prediction backbone — the iso-compute CFM-vs-DDPM head-to-head baseline.**
