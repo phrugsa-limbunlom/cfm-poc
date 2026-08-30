@@ -12,7 +12,8 @@
   "dataset_sources": [
     "raddar/tuberculosis-chest-xrays-shenzhen",
     "jiahongqian/cephalometric-landmarks",
-    "phrugsalimbunlom/digital-hand-atlas-256"
+    "phrugsalimbunlom/digital-hand-atlas-256",
+    "wahyurahmaniar/aasce-miccai-2019-x-ray-dataset"
   ],
   "kernel_sources": [],
   "competition_sources": [],

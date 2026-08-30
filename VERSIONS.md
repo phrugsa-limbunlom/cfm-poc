@@ -9,6 +9,43 @@ add a new heading each time a version is pushed; do not rewrite past entries.
 
 ---
 
+## v26 (2026-08-30)
+
+**AASCE OOD probe — CFM backbone head-to-head (switched `backbone` ddpm→cfm).**
+
+- Same notebook as v25 (AASCE §6.8 OOD probe wired in), re-run with
+  `EXPERIMENT["backbone"] = "cfm"` and `ot_coupling = True` restored (the
+  v22 CFM this-work config: align=True, ot_coupling=True, schrödinger
+  interpolant). No other controlled variable changed.
+- Produces the CFM counterpart of the v25 DDPM `aasce/*` and `aasce-frozen/*`
+  rows, enabling the CFM-vs-DDPM out-of-domain (spine) comparison at matched
+  25-shot / image_size=256 / seed=0 / λ_align=5.0.
+
+---
+
+## v25 (2026-08-30)
+
+**AASCE out-of-domain (OOD) probe wired in — spine-radiograph transfer test
+(backbone=`ddpm` this push).**
+
+- **New dataset source:** added `wahyurahmaniar/aasce-miccai-2019-x-ray-dataset`
+  to `kernel-metadata.json` `dataset_sources` (labelled AASCE MICCAI-2019
+  mirror, 481 images, 68 landmarks = 17 vertebrae × 4 corners).
+- **Loader (Cell 11):** new `AASCELandmarkDataset` (BoostNet BLOCK label layout —
+  first 68 CSV cols = all x-coords, next 68 = all y-coords, normalized [0,1],
+  denormalized to px @256) + `build_dataset` branch for `dataset=="aasce"`.
+- **Discovery (Cell 9):** `find_aasce()` exposing `AASCE_ROOT`, `AASCE_CSV_DIR`.
+- **New §6.8 OOD probe (Cells 28–29):** runs finetune + frozen-probe,
+  pretrained vs random, with a 2×2 gain-over-random summary. Logs rows
+  `aasce/*` and `aasce-frozen/*`. Metrics in **pixels @256** (no mm scale in
+  this mirror) — fair for CFM-vs-DDPM and pretrained-vs-random, NOT comparable
+  to ISBI mm numbers.
+- **Purpose:** test whether the generative representation transfers to unseen
+  anatomy (spine). Positive frozen-probe gain-over-random on AASCE = direct
+  evidence for the data-efficient/transferable-representation thesis.
+
+---
+
 ## v24 (2026-08-29)
 
 **§7 sampling made backbone-aware — correct DDPM ancestral SDE sampler.**

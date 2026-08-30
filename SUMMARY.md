@@ -2279,3 +2279,67 @@ so the comparison isolates the flow-matching-vs-DDPM objective cleanly.
   pretrained features are intrinsically more informative for this task").
   `POC_SUMMARY.md`'s headline table should report **both** numbers with this
   distinction spelled out, rather than picking one as "the" claim.
+
+---
+
+# Out-of-domain (OOD) transfer probe added: AASCE spinal X-rays (68 landmarks)
+
+## What was added and why
+
+To test the core "transferable / data-efficient representation" claim on an
+anatomy ABSENT from pretraining, added an out-of-domain downstream probe on the
+AASCE / BoostNet spinal AP X-ray dataset. The backbone is pretrained on chest
+(Shenzhen) + cephalometric (ISBI) + hand (DHA); **spine is unseen**, though the
+modality (X-ray) is shared. This isolates one variable: the downstream domain's
+presence/absence in pretraining. Falsifiable prediction: if generative
+pretraining learns a genuinely transferable representation, the frozen-probe
+gain-over-random should stay POSITIVE even OOD; if the gain collapses to ~0, the
+representation is domain-specific.
+
+## Data source (no upload needed)
+
+The original SpineWeb source is expired/access-gated, but a labelled mirror is
+already on Kaggle: `wahyurahmaniar/aasce-miccai-2019-x-ray-dataset` (58 MB).
+Verified contents: `train/*.jpg` (481 labelled AP spine radiographs),
+`train_txt/filenames.csv` (row-aligned image names), `train_txt/landmarks.csv`
+(481 x 136).
+
+## Label format (verified locally before wiring in)
+
+- **BLOCK layout**, NOT interleaved: for each image the first 68 CSV columns are
+  ALL x-coordinates, the next 68 are ALL y-coordinates. Confirmed empirically:
+  the x-block has narrow spread (std ~0.14, a centred vertical column) and the
+  y-block spans nearly the full range (std ~0.27), matching spine anatomy.
+- Coordinates are **normalised to [0, 1]** by original width/height, so mapping
+  to the square `image_size` grid is exact: `px = norm * image_size` per axis.
+- **Anatomical sanity check passed:** decoding as 17 vertebrae x 4 corners gives
+  monotonically increasing per-vertebra mean-y (top->bottom, 11->236 px @256)
+  and y-spread (68.6) >> x-spread (35.7), i.e. a vertical spine column. The
+  block-decoding is therefore correct (not transposed/flipped).
+- **No mm scale** ships with this mirror, so error is reported in **pixels @256**
+  (mm/px = 1.0). This is a fair CFM-vs-DDPM and pretrained-vs-random comparison
+  (identical unit, dataset, split, head) but is NOT comparable to the ISBI
+  millimetre numbers.
+
+## Code changes (cfm_delta_align_pretrain.ipynb)
+
+- **Cell 11 (cfm_pretrain.py):** new `AASCELandmarkDataset` (parses
+  filenames.csv + landmarks.csv, block-decodes, denormalises to px@image_size)
+  and a `build_dataset` branch for `dataset="aasce"`. The generic seeded
+  else-branch of the probe's `build_eval_split` handles the 25-shot / test_frac
+  split (verified: train=25, val=72, test=144 of 481).
+- **Cell 9:** `find_aasce()` discovery (Kaggle mount + kagglehub fallback),
+  exposing `AASCE_ROOT`, `AASCE_CSV_DIR`.
+- **New section 6.8 (markdown + code, cells 28-29):** OOD probe running BOTH
+  protocols (finetune + frozen linear-probe), each pretrained vs random-init,
+  logging rows `aasce/*` and `aasce-frozen/*` with a 2x2 gain-over-random
+  summary. Metric unit = px@256.
+- **kernel-metadata.json:** added
+  `wahyurahmaniar/aasce-miccai-2019-x-ray-dataset` to `dataset_sources`.
+
+## How to run the head-to-head
+
+Run the whole kernel once per `EXPERIMENT["backbone"]` (`cfm` then `ddpm`),
+identical to the existing ISBI head-to-head. The new `aasce*` rows land in
+`experiment_results.csv`. Note this is 481 labelled images (the public labelled
+AASCE subset), not the full 609.
