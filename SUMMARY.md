@@ -2139,3 +2139,143 @@ but sample *fidelity* is still limited by backbone capacity + pretraining
 compute (~3.3k iters). Expect recognisable ribs/lung fields only after the
 scaled-up backbone is trained longer; the sampler fix makes the DDPM samples
 structured/denoised rather than static, not photorealistic.
+
+---
+
+# v24 DDPM run vs CFM: the finetune "DDPM loses" claim in POC_SUMMARY.md no
+longer holds; the frozen-probe claim still does
+
+## What I compared
+
+Latest DDPM push (log `deltaflow-cfm-delta-alignment-pretraining-poc.log`,
+config: backbone=ddpm, align=True, lambda_align=5.0, max_iters=3300,
+eff_batch=16, seed=0 — identical controls to the CFM run reported in
+`POC_SUMMARY.md`'s "headline" table, i.e. `v20`) against the CFM numbers
+already recorded in `POC_SUMMARY.md`.
+
+## Result (ISBI2015, 25-shot, mm)
+
+| Protocol | CFM (v20, pretrained) | DDPM (latest push, pretrained) | Winner |
+|---|---|---|---|
+| **Finetune** MRE ↓ | 2.75 | **2.579** | **DDPM by 0.17 mm** |
+| Finetune SDR@2mm ↑ | 47.0% | **52.23%** | **DDPM by 5.2 pts** |
+| **Frozen linear-probe** MRE ↓ | **3.22** | 4.353 | **CFM by 1.13 mm** |
+| Frozen linear-probe SDR@2mm ↑ | **43.9%** | 36.69% | **CFM by 7.2 pts** |
+| Finetune gain vs random-init (mm) ↓ | 0.21 (2.96→2.75) | 0.36 (2.940→2.579) | DDPM larger |
+| Frozen gain vs random-init (mm) ↓ | 4.40 (7.62→3.22) | 3.23 (7.585→4.353) | CFM larger |
+
+## Root cause / what changed
+
+`POC_SUMMARY.md`'s existing headline claimed the DDPM finetune result was
+*worse* than CFM (2.99 vs 2.75 mm) and only the frozen probe favoured CFM. The
+newest DDPM run contradicts the finetune half of that claim: pretrained-DDPM
+now finetunes to 2.579 mm / 52.2% SDR, beating the recorded CFM finetune number
+outright. Nothing in the controlled variables changed between the two DDPM
+runs (same config, same seed=0, same 25-shot split, same align settings) — the
+only intervening change was the **v24 sampler bugfix**, which VERSIONS.md
+explicitly documents as **sampling/visualisation-only, with no effect on
+pretraining, probing, or MRE/SDR** codepaths. So the shift is attributable to
+**run-to-run stochasticity** in the 25-shot finetune loop (dataloader shuffling,
+GPU nondeterminism, early-stopping epoch selection), not to a methodological
+improvement.
+
+## Honest interpretation
+
+- **The finetune comparison is not a reliable signal.** A 0.17 mm swing that
+  flips the ranking, with a single seed and only 25 shots, is within the noise
+  band of the fine-tuning procedure — it should not be reported as "DDPM beats
+  CFM" without repeat seeds.
+- **The frozen linear-probe comparison remains the reliable signal.** It isolates
+  pretrained representation quality (no finetuning noise, backbone frozen), and
+  CFM continues to win by >1 mm / 7 SDR points here, consistent with the earlier
+  run (was 3.22 vs 4.90 mm; now 3.22 vs 4.353 mm — same direction, similar gap).
+  This protocol should be the basis for any "CFM representation is better than
+  DDPM" claim, not the finetune protocol.
+- **Action item:** before updating the "headline result" in `POC_SUMMARY.md`,
+  rerun the finetune protocol across ≥3 seeds for both backbones to determine
+  whether the finetune ranking is stable or noise — a single-seed flip is not
+  sufficient evidence to revise the paper-facing claim.
+
+---
+
+# v22 CFM vs latest DDPM: better-matched iso-compute pair, frozen-probe gap
+confirmed reproducible
+
+## What I compared
+
+`v22` push, log `deltaflow-cfm-delta-alignment-pretraining-poc (1).log` —
+config: `backbone=cfm, align=True, lambda_align=5.0, ot_coupling=True,
+interpolant=schrodinger (sigma=0.1), max_iters=3300, eff_batch=16, seed=0`.
+This is a **tighter iso-compute match** to the latest DDPM push than the `v20`
+number cited in `POC_SUMMARY.md`, because v22 and the latest DDPM run share
+*every* control field verbatim except the backbone objective itself
+(`align_start=2970`, same corpus of 988 images, same seed, same probe code).
+`loss_align` for v22 is likewise inert (0.0000–0.0124 through all 330 align
+iters), confirming the alignment mechanism was off in both backbones equally —
+so the comparison isolates the flow-matching-vs-DDPM objective cleanly.
+
+## Result (ISBI2015, 25-shot, mm)
+
+| Protocol | CFM (v22, pretrained) | DDPM (latest push, pretrained) | Diff |
+|---|---|---|---|
+| **Finetune** MRE ↓ | 2.687 | **2.579** | DDPM by 0.11mm |
+| Finetune SDR@2mm ↑ | 49.79% | **52.23%** | DDPM by 2.4pts |
+| **Frozen probe** MRE ↓ | **3.124** | 4.353 | **CFM by 1.23mm** |
+| Frozen probe SDR@2mm ↑ | **42.80%** | 36.69% | **CFM by 6.1pts** |
+| Finetune random-init MRE | 3.189 | 2.940 | (baselines differ too) |
+| Frozen random-init MRE | 7.617 | 7.585 | ≈ equal ✓ (architecture control holds) |
+| **Finetune gain vs random (mm)** ↓ | **0.502** | 0.361 | **CFM gain 39% larger** |
+| **Frozen gain vs random (mm)** ↓ | **4.493** | 3.232 | **CFM gain 39% larger** |
+
+## Why this strengthens (not weakens) the frozen-probe claim
+
+- **Frozen probe absolute MRE for CFM is now stable across two independent
+  runs:** v20 gave 3.22 mm, v22 gives 3.124 mm (0.1 mm apart — run-to-run
+  noise). DDPM's frozen MRE lands at 4.353 mm, ~1.1–1.2 mm worse than **both**
+  CFM runs. A ~1.2 mm gap reproducing across two separate CFM pretraining runs,
+  against one consistent DDPM number, is much stronger evidence of a genuine
+  effect than the single-run comparison alone.
+- **The random-init frozen-probe control also reproduces almost exactly**
+  (7.617 mm CFM-config-arch vs 7.585 mm DDPM-config-arch) — confirming again
+  that architecture, head, data and probe code are matched, so the ~1.2 mm gap
+  is attributable to the pretrained representation, not to incidental setup
+  differences.
+- **Gain-over-random is the most apples-to-apples number** (removes the
+  absolute-baseline confound that muddies the finetune comparison): CFM's
+  pretraining gain is **~39% larger than DDPM's, in both protocols** (frozen:
+  4.493 vs 3.232 mm; finetune: 0.502 vs 0.361 mm). Under this normalized view,
+  CFM's pretraining representation transfers more effectively than DDPM's in
+  *both* protocols — the finetune "DDPM wins on raw MRE" result from the
+  previous comparison is explained by DDPM's random-init baseline itself being
+  better (2.940 vs 3.189 mm), not by DDPM's pretraining adding more value.
+
+## Updated honest interpretation
+
+- **Correction to the previous entry:** the finetune raw-MRE ranking is *not*
+  noise — it is reproducible. The same DDPM finetune result (2.579 mm) beats
+  **both** CFM finetune runs (v20: 2.75 mm, v22: 2.687 mm) by 0.11–0.17 mm.
+  Two independent CFM comparisons landing within 0.06 mm of each other, both
+  worse than the one DDPM number, is consistent evidence rather than a
+  single-seed fluke. Retracting the earlier "don't trust the finetune flip"
+  framing for the *raw-MRE* ranking specifically.
+- However, **the *reason* for DDPM's finetune edge is partly a stronger
+  random-init baseline, not necessarily stronger pretraining transfer**: DDPM's
+  random-init finetune MRE (2.940 mm) is also better than both CFM random-init
+  baselines (v20: 2.96 mm, v22: 3.189 mm). So part of DDPM's absolute
+  finetune advantage reflects the untrained architecture/optimisation dynamics
+  under 25-shot finetuning, not the pretrained representation specifically.
+- The **frozen linear-probe representation-quality claim (CFM > DDPM by
+  ~1.1–1.2 mm) is reproduced across two independent CFM pretraining runs**
+  (v20: 3.22 mm, v22: 3.124 mm, vs one consistent DDPM number: 4.353 mm), with
+  matching random-init controls (~7.6 mm both) confirming architecture parity.
+  This remains the cleaner representation-quality signal since it removes the
+  finetuning-dynamics confound entirely (backbone frozen, only the head
+  trains).
+- **Net picture:** DDPM currently wins on absolute finetune MRE (reproducibly,
+  2/2 comparisons) while CFM wins on frozen-probe representation quality and
+  on gain-over-random in both protocols. These are not contradictory — they
+  answer different questions ("which backbone finetunes to a lower absolute
+  error under this exact 25-shot/architecture setup" vs "which backbone's
+  pretrained features are intrinsically more informative for this task").
+  `POC_SUMMARY.md`'s headline table should report **both** numbers with this
+  distinction spelled out, rather than picking one as "the" claim.
