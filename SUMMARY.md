@@ -2413,3 +2413,86 @@ signals.
 Evidence supports the hypothesis: replacing DDPM with flow matching improves
 pretrained-representation quality — better MRE/SDR/P95 on all datasets under
 pretrained init, and a consistently positive, larger pretraining transfer gain.
+
+================================================================================
+## Reference Q&A: datasets, iterations, alignment loss, metrics (2026-09-26)
+================================================================================
+
+Consolidated answers to recurring "what does the paper do" questions, with the
+CDPM.pdf evidence and our latest (v20) config for side-by-side comparison.
+
+### 1. How many datasets and iterations? (ours v20 vs CDPM)
+
+Datasets -- BOTH use the same pooled 3-dataset corpus of 988 images:
+  - Shenzhen [17]  -- 279 AP chest radiographs, 6 landmarks  (metric = pixels; no spacing)
+  - ISBI2015 [27]  -- 400 lateral cephalograms, 19 landmarks (metric = mm)
+  - DHA [12]       -- 910 hand radiographs, 37 landmarks      (metric = mm)
+  (v20 corpus breakdown as logged: chest 279 / ISBI 150 / DHA 559 = 988 imgs.)
+  NOTE: earlier versions pretrained on Shenzhen ALONE, then Shenzhen+ISBI2015;
+  the current v20 restores all three, so the corpus is now matched to the paper.
+
+Iterations:
+  | knob             | CDPM paper            | ours (v20)          | ratio      |
+  |------------------|-----------------------|---------------------|------------|
+  | total pretrain   | 50,000                | 3,300               | ~15x fewer |
+  | - std diffusion  | 45,000                | 2,970               |            |
+  | - alignment (10%)| 5,000                 | 330                 | ~15x fewer |
+  | batch size       | 16 (AdamW)            | 16 (effective)      | matched    |
+  | align fraction   | final 10%             | final 10%           | matched    |
+
+  Bottom line: datasets/corpus, batch, align-fraction, timestep range and
+  forward-t controls are faithful. The dominant UNMATCHED control is TRAINING
+  SCALE (~15x fewer iters, GPU-budget capped) -- this is why loss_align stays
+  ~0.0002 (only 330 align iters) and the CFM backbone saturates undertrained, so
+  the current CFM-vs-CDPM comparison is scale-confounded.
+
+### 2. Purpose of the alignment loss
+
+CDPM-Align's key contribution. It enforces DIRECTIONAL CONSISTENCY of the
+classifier-free guidance signal ACROSS TIMESTEPS, so the backbone learns
+class/dataset-discriminative anatomical structure instead of over-relying on the
+class token -- improving localisation accuracy and calibrated uncertainty in
+low-shot regimes.
+
+Mechanism:
+  - For each image, sample two timesteps t1, t2 ~ p(t).
+  - Compute the guidance delta at each: Dh = h_cond - h_uncond (conditional minus
+    unconditional features), at FOUR UNet scales.
+  - Pool each Dh (GAP -> MLP -> l2-normalise) and enforce COSINE alignment
+    between the t1 and t2 directions.
+  - Intuition (paper): the mid-timestep guidance direction is the most
+    dataset-discriminative; aligning it across timesteps makes the guidance
+    signal a stable, transferable representation of anatomy rather than noise.
+
+Why it matters for transfer: the aligned Dh is exactly the feature the downstream
+landmark detector reuses -> a consistent guidance direction -> better, more
+transferable pretrained features -> lower MRE / higher SDR.
+
+Compute note: runs ONLY in the final 10% of iterations (an alignment fine-tuning
+phase, lambda_align-weighted) to cap the 4x-forward-pass overhead.
+
+Relevance to our experiment: alignment is a CONTROLLED variable -- to attribute
+gains to the DDPM->CFM backbone swap, BOTH backbones must use the same alignment
+mechanism and the same iters. Do not handicap DDPM.
+
+### 3. Evaluation metrics
+
+  | metric | meaning                                                    | direction |
+  |--------|------------------------------------------------------------|-----------|
+  | MRE    | Mean Radial Error -- mean Euclid. dist. pred vs GT landmark | lower     |
+  | SDR@r  | Success Detection Rate -- % landmarks within radius r       | higher    |
+  |        |   (thresholds: 2mm, 2.5mm, 3mm, 4mm)                        |           |
+  | ERE    | Expected Radial Error -- predicted uncertainty / calibration| lower     |
+  | P95    | 95th-percentile radial error -- worst-case / robustness tail| lower     |
+
+  Unit rule (CRITICAL): report in MILLIMETRES using the correct mm_per_pixel for
+  datasets with spacing (ISBI2015, DHA). Shenzhen has NO pixel spacing -> evaluate
+  in PIXELS; never compare Shenzhen px against the paper's mm numbers.
+
+  Reference to beat (CDPM-Align, ISBI2015 25-shot): MRE = 1.54 mm,
+  SDR@2mm = 77.52% (ERE = 0.95, P95 = 3.90).
+
+  Fair-comparison rule: same metric, same unit (mm), same dataset + split, same
+  shot budget; report mean +/- spread over seeds. A pixel-space error must never
+  be compared against the paper's mm numbers.
+
